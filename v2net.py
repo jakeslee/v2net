@@ -8,11 +8,11 @@ import pyperclip
 import logging
 from jinja2 import Template
 from PyQt5.QtGui import QIcon
-from PyQt5.QtWidgets import QMenu, QAction, QActionGroup, QSystemTrayIcon
+from PyQt5.QtWidgets import QMenu, QAction, QActionGroup, QSystemTrayIcon, QWidget, QLabel
 from PyQt5.QtCore import QThread, QMutex, pyqtSignal
 from v2config import Config
 from v2widget import APP, WINDOW
-version = '0.2.3'
+VERSION = '0.2.5'
 base_path = os.path.dirname(os.path.realpath(__file__))
 ext_path = os.path.join(base_path, 'extension')
 profile_path = os.path.join(base_path, 'profile')
@@ -41,6 +41,7 @@ logging.basicConfig(
 class Extension(QThread):
     # 定义信号
     update_port = pyqtSignal()
+    toggle_menu = pyqtSignal()
 
     def __init__(self, extension, *menus_to_enable):
         super().__init__()
@@ -64,12 +65,6 @@ class Extension(QThread):
         self.ext_log = None
 
     def select(self):
-        # 设置菜单选中状态
-        self.QAction.setChecked(True)
-        for menu_to_enable in self.menus_to_enable:
-            menu_to_enable.setChecked(True)
-            menu_to_enable.setDisabled(False)
-
         # 绑定信号的动作
         def update_port():
             current[self.role] = self
@@ -79,7 +74,19 @@ class Extension(QThread):
                 http_port = self.local_port if self.http else ''
                 socks5_port = self.local_port if self.socks5 else ''
 
+        def toggle_menu():
+            # 设置菜单选中状态
+            self.QAction.setChecked(True)
+            self.menus_to_enable[0].setChecked(True)
+            self.menus_to_enable[0].setDisabled(False)
+            for menu_to_enable in self.menus_to_enable[1:]:
+                if self.url:
+                    menu_to_enable.setDisabled(False)
+                else:
+                    menu_to_enable.setDisabled(True)
+
         self.update_port.connect(update_port)
+        self.toggle_menu.connect(toggle_menu)
         # 在新线程中启动组件
         self.last = current[self.role]
         current[self.role] = self
@@ -165,15 +172,17 @@ class Extension(QThread):
         self.ext_log = open(os.path.join(log_path, self.name + '.log'), 'a', encoding='UTF-8')
         if pre:
             subprocess.run(pre, shell=True, check=True,
-                           stdout=self.ext_log, stderr=subprocess.PIPE)
+                           stdout=self.ext_log, stderr=subprocess.STDOUT)
         self.process = subprocess.Popen(self.bin + ' ' + args, shell=True,
-                                        stdout=self.ext_log, stderr=subprocess.PIPE)
+                                        stdout=self.ext_log, stderr=subprocess.STDOUT)
         logging.info(
             '[' + self.ext_name + ']' + self.name + " started, pid=" + str(self.process.pid))
         self.update_port.emit()
         if system:
             setproxy()
         profile.write('General', self.role, self.name)
+        # Enable/Disable other menu items like Dashboard
+        self.toggle_menu.emit()
         logging.debug(
             '[' + self.ext_name + ']' + self.name + " release Lock.")
         mutex.unlock()
@@ -184,7 +193,7 @@ class Extension(QThread):
         # 调用停止命令
         if self.exitargs:
             subprocess.run(self.bin + ' ' + self.exitargs, shell=True, check=True,
-                           stdout=self.ext_log, stderr=subprocess.PIPE)
+                           stdout=self.ext_log, stderr=subprocess.STDOUT)
         # 结束启动进程
         if self.process.returncode is None:
             self.process.terminate()
@@ -398,7 +407,7 @@ def main():
         menu.addAction(m_extension)
         menu.addAction(m_copy_shell)
         menu.addSeparator()
-        m_quit = QAction('Quit V2Net (' + version + ')')
+        m_quit = QAction('Quit V2Net (' + VERSION + ')')
         m_quit.setShortcut('Ctrl+Q')
         m_quit.triggered.connect(APP.quit)
         menu.addAction(m_quit)
